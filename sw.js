@@ -1,20 +1,34 @@
-# RODAME Distribuidora — App de gestión (PWA)
+/* Service worker — caché para que RODAME funcione sin conexión.
+   La app es de un solo archivo (index.html con todo incrustado), así que
+   solo cacheamos el shell, el manifiesto y los íconos. Al publicar en un
+   servidor HTTPS (GitHub Pages, Netlify…) la app queda instalable y offline. */
+const CACHE = 'rodame-v2';
+const ASSETS = [
+  './', 'index.html', 'manifest.json',
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png'
+];
 
-App web instalable para gestionar venta de pescados y mariscos.
-Módulos: Inicio, Catálogo (con costos, margen e import/export Excel),
-Clientes, Ventas (con boleta y pago/crédito), Finanzas + Cobranza,
-Reportes y WhatsApp masivo. Datos en el dispositivo, con sincronización
-opcional en la nube (Supabase) para usar el iPhone y el PC con los mismos datos.
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(()=>{})));
+});
 
-## Publicar en GitHub Pages (gratis, con HTTPS)
-1. Crea un repositorio y sube estos archivos a la raíz (index.html, manifest.json, sw.js, icons/).
-2. Settings → Pages → Deploy from a branch → main → /(root) → Save.
-3. En ~2 min queda en https://TU-USUARIO.github.io/TU-REPO/.
-4. iPhone (Safari): abre el link → botón Compartir → "Agregar a inicio".
-   PC (Chrome/Edge): icono de instalar en la barra de direcciones.
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+  );
+  self.clients.claim();
+});
 
-## Sincronizar iPhone + PC (opcional, con Supabase)
-En la app: Más → Ajustes → "Sincronización en la nube".
-- Pega la URL del proyecto y la anon key (Supabase → Project Settings → API).
-- Inventa un "código de espacio" y úsalo IGUAL en todos los dispositivos.
-- La primera vez crea la tabla con el SQL que muestra la app (botón "Ver paso 1").
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  // Red primero (para fuentes y CDNs); caché como respaldo para el shell.
+  e.respondWith(
+    fetch(req).then(res => {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(req, copy)).catch(()=>{});
+      return res;
+    }).catch(() => caches.match(req).then(r => r || caches.match('index.html')))
+  );
+});
